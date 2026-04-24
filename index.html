@@ -189,6 +189,30 @@
   }
   #practiceText .pending { color: var(--muted); opacity: 0.5; }
 
+  #holdMeter {
+    position: relative;
+    height: 4px; width: 100%;
+    background: var(--dim);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  #holdMeter .hm-fill {
+    position: absolute; inset: 0 auto 0 0;
+    width: 0%;
+    background: var(--accent);
+    transition: background 0.08s linear;
+  }
+  #holdMeter.is-dash .hm-fill { background: var(--hot); }
+  #holdMeter .hm-thresh {
+    position: absolute; top: -2px; bottom: -2px;
+    width: 1px;
+    background: var(--muted);
+    opacity: 0.6;
+    /* threshold visually marks 2 units; its left position depends on max scale below */
+  }
+  .practice-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
   /* Game */
   #gamePrompt {
     font-family: ui-monospace, monospace;
@@ -203,7 +227,14 @@
   #gameStats { font-family: ui-monospace, monospace; color: var(--muted); font-size: 13px; }
   #gameStats b { color: var(--ink); font-weight: 500; }
 
-  #gamePromptWrap { position: relative; }
+  #gamePromptWrap { position: relative; border-radius: 4px; transition: background 0.1s, box-shadow 0.1s; }
+  #gamePromptWrap.wrong-flash {
+    animation: wrongFlash 0.38s ease-out;
+  }
+  @keyframes wrongFlash {
+    0%   { background: rgba(252,165,165,0.28); box-shadow: 0 0 0 1px var(--bad) inset; }
+    100% { background: transparent; box-shadow: 0 0 0 1px transparent inset; }
+  }
   #gameOverlay {
     position: absolute; inset: 0;
     display: none;
@@ -331,12 +362,17 @@
 
     <h2>buffer</h2>
     <div id="practiceBuffer">&nbsp;</div>
+    <div id="holdMeter" aria-hidden="true">
+      <div class="hm-fill"></div>
+      <div class="hm-thresh" title="dot ⟶ dash at 2 units"></div>
+    </div>
 
     <h2>decoded</h2>
     <div id="practiceText">&nbsp;</div>
-    <div style="margin-top:10px;">
+    <div class="practice-controls" style="margin-top:10px;">
       <button id="clearPractice" class="btn">clear</button>
       <button id="backspacePractice" class="btn">⌫</button>
+      <button id="visualizePractice" class="btn" title="send decoded text to visualizer">visualize</button>
       <span class="stat" style="margin-left:12px;">unit <b id="statUnit">80</b>ms</span>
       <span class="stat">last <b id="statLast">—</b>ms</span>
     </div>
@@ -701,6 +737,10 @@ function currentKeyPad() {
   return document.getElementById("keyPad");
 }
 
+function vibrate(ms) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch(e) {}
+}
+
 function pressDown() {
   if (keyIsDown) return;
   const tab = activeTab();
@@ -711,6 +751,7 @@ function pressDown() {
   keyDownAt = performance.now();
   currentKeyPad().classList.add("down");
   startTone();
+  if (tab === "practice") startHoldMeter();
 }
 function pressUp() {
   if (!keyIsDown) return;
@@ -719,9 +760,11 @@ function pressUp() {
   document.getElementById("keyPad").classList.remove("down");
   document.getElementById("gameKeyPad").classList.remove("down");
   stopTone();
+  stopHoldMeter();
   const u = unitMs();
   const sym = held < u * 2 ? "." : "-";
   curCode += sym;
+  vibrate(sym === "." ? 10 : 22);
   onSymbol(sym, held);
   // Letter gap: canonical 3 units of silence.
   letterTimer = setTimeout(commitLetter, u * 3);
@@ -814,6 +857,42 @@ const statLast = document.getElementById("statLast");
 let decodedText = "";
 let wordTimer = null;
 
+// Hold-duration meter: fills as the user holds, crosses dot→dash threshold at 2 units.
+// Full bar = 4 units (well past the dash threshold so the user can see the margin).
+const holdMeter = document.getElementById("holdMeter");
+const holdFill = holdMeter.querySelector(".hm-fill");
+const holdThresh = holdMeter.querySelector(".hm-thresh");
+let holdRaf = 0;
+const HOLD_MAX_UNITS = 4;
+function positionHoldThreshold() {
+  holdThresh.style.left = (2 / HOLD_MAX_UNITS * 100) + "%";
+}
+positionHoldThreshold();
+function startHoldMeter() {
+  const u = unitMs();
+  const start = performance.now();
+  const tick = () => {
+    const held = performance.now() - start;
+    const units = held / u;
+    const pct = Math.min(100, (units / HOLD_MAX_UNITS) * 100);
+    holdFill.style.width = pct + "%";
+    holdMeter.classList.toggle("is-dash", units >= 2);
+    if (keyIsDown) holdRaf = requestAnimationFrame(tick);
+  };
+  holdRaf = requestAnimationFrame(tick);
+}
+function stopHoldMeter() {
+  if (holdRaf) cancelAnimationFrame(holdRaf);
+  holdRaf = 0;
+  // Brief linger so the user sees the final length, then decay.
+  setTimeout(() => {
+    if (!keyIsDown) {
+      holdFill.style.width = "0%";
+      holdMeter.classList.remove("is-dash");
+    }
+  }, 120);
+}
+
 function renderPractice() {
   practiceBuffer.textContent = curCode || " ";
   const pending = curCode ? `<span class="pending">${CODE_TO_CHAR[curCode] || "?"}</span>` : "";
@@ -847,6 +926,20 @@ document.getElementById("backspacePractice").addEventListener("click", () => {
   curCode = "";
   if (decodedText) decodedText = decodedText.slice(0, -1);
   renderPractice();
+});
+document.getElementById("visualizePractice").addEventListener("click", () => {
+  const cleaned = (decodedText || "")
+    .toUpperCase()
+    .split("")
+    .filter(c => MORSE[c] || c === " ")
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return;
+  textInput.value = cleaned.slice(0, +textInput.maxLength || 80);
+  renderMorse(textInput.value);
+  drawTimeline();
+  document.querySelector('.tab[data-tab="viz"]').click();
 });
 renderPractice();
 
@@ -955,6 +1048,17 @@ function gameOnSymbol(sym) {
   if (activeTab() === "game") highlightInto(svgGame, curCode);
 }
 
+const gamePromptWrap = document.getElementById("gamePromptWrap");
+let flashTimer = null;
+function flashWrong() {
+  gamePromptWrap.classList.remove("wrong-flash");
+  // Reflow to restart the animation reliably.
+  void gamePromptWrap.offsetWidth;
+  gamePromptWrap.classList.add("wrong-flash");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => gamePromptWrap.classList.remove("wrong-flash"), 400);
+}
+
 function gameOnLetter(code) {
   if (!game.running) return;
   const expected = game.target[game.idx];
@@ -971,6 +1075,8 @@ function gameOnLetter(code) {
     game.correct++;
   } else {
     game.marks[game.idx] = "bad";
+    flashWrong();
+    vibrate([12, 40, 12]);
   }
   game.idx++;
   // Skip past spaces in the display.
