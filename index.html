@@ -1165,6 +1165,9 @@ function endGame(showDone = false) {
   gameStart.textContent = "start";
   gameStart.classList.remove("gameStart-running");
   if (keyIsDown) pressUp();
+  highlightInto(svgGame, "");
+  svgGame.querySelectorAll(".node.target").forEach(n => n.classList.remove("target"));
+  svgGame.querySelectorAll(".edge.target").forEach(e => e.classList.remove("target"));
   renderGame();
   if (showDone && wasRunning) {
     const wpmTxt = gameWpm.textContent;
