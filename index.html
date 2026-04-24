@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>morse</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --ink: #e6e6e6;
+    --muted: #6b6b72;
+    --dim: #2a2a2e;
+    --accent: #7dd3fc;
+    --hot: #f472b6;
+    --good: #86efac;
+    --bad: #fca5a5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 48px; }
+
+  .top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .brand {
+    font-family: ui-monospace, monospace;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 3px;
+  }
+  .settings { display: flex; gap: 16px; align-items: center; color: var(--muted); font-size: 12px; }
+  .settings input[type="range"] { width: 80px; accent-color: var(--accent); }
+
+  .tabs {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 28px;
+    font-family: ui-monospace, monospace;
+  }
+  .tab {
+    background: none; border: none; padding: 0 0 4px;
+    color: var(--muted); cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    border-bottom: 1px solid transparent;
+    display: inline-flex; align-items: baseline;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .tab .slot,
+  .brand .slot {
+    position: relative;
+    display: inline-block;
+    margin-right: 6px;
+    text-align: center;
+  }
+  .tab .slot:last-child,
+  .brand .slot:last-child { margin-right: 0; }
+  .tab .slot .m,
+  .tab .slot .e,
+  .brand .slot .m,
+  .brand .slot .e {
+    display: inline-block;
+    transition: opacity 240ms ease;
+    transition-delay: calc(var(--i) * 40ms);
+  }
+  .tab .slot .e,
+  .brand .slot .e {
+    position: absolute; left: 0; right: 0;
+    opacity: 0;
+    letter-spacing: 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    text-transform: uppercase;
+  }
+  .tab:hover .slot .m,
+  .brand:hover .slot .m { opacity: 0; }
+  .tab:hover .slot .e,
+  .brand:hover .slot .e { opacity: 1; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  h2 {
+    font-size: 11px; font-weight: 500; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 2px;
+    margin: 28px 0 10px;
+  }
+  h2:first-child { margin-top: 0; }
+
+  input[type="text"] {
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid var(--dim);
+    padding: 6px 0;
+    font-family: inherit;
+    font-size: 15px;
+    width: 100%;
+    outline: none;
+  }
+  input[type="text"]:focus { border-bottom-color: var(--accent); }
+
+  button.btn {
+    background: none;
+    color: var(--ink);
+    border: 1px solid var(--dim);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  button.btn.primary { border-color: var(--accent); color: var(--accent); }
+  button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #morseOut {
+    font-family: ui-monospace, monospace;
+    font-size: 15px; color: var(--muted);
+    word-break: break-word; line-height: 1.8;
+  }
+  #morseOut .sym { padding: 1px 3px; border-radius: 3px; }
+  #morseOut .sym.active { background: var(--hot); color: var(--bg); }
+
+  svg { width: 100%; display: block; }
+  .tree-wrap { overflow-x: auto; }
+  .node circle { fill: var(--bg); stroke: var(--dim); stroke-width: 1; transition: fill 0.1s, stroke 0.1s; }
+  .node text { fill: var(--muted); font: 500 10px ui-monospace, monospace; text-anchor: middle; dominant-baseline: central; }
+  .node.visited circle { stroke: var(--accent); }
+  .node.visited text { fill: var(--ink); }
+  .node.current circle { fill: var(--hot); stroke: var(--hot); }
+  .node.current text { fill: var(--bg); }
+  .node.target circle { stroke: var(--good); stroke-dasharray: 2 2; }
+  .edge { stroke: var(--dim); stroke-width: 1; fill: none; transition: stroke 0.1s, stroke-width 0.1s; }
+  .edge.lit { stroke: var(--accent); stroke-width: 1.5; }
+  .edge.target { stroke: var(--good); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .edge-label { fill: var(--muted); font: 9px ui-monospace, monospace; text-anchor: middle; opacity: 0.5; }
+  #timeline { background: transparent; border-radius: 4px; }
+
+  /* Key pad: minimal dot */
+  .keypad {
+    user-select: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 10px 0;
+  }
+  .keypad .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.05s, transform 0.05s;
+  }
+  .keypad.down .dot { background: var(--hot); transform: scale(1.4); }
+  .keypad .hint { color: var(--muted); font-size: 12px; }
+
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+  .row > * { min-width: 0; }
+
+  .stat { color: var(--muted); font-size: 12px; margin-right: 16px; font-family: ui-monospace, monospace; }
+  .stat b { color: var(--ink); font-weight: 500; }
+
+  #practiceBuffer {
+    font-family: ui-monospace, monospace;
+    font-size: 28px; letter-spacing: 6px;
+    color: var(--accent); min-height: 36px;
+  }
+  #practiceText {
+    font-family: ui-monospace, monospace;
+    font-size: 18px; line-height: 1.6;
+    word-break: break-word; min-height: 28px;
+  }
+  #practiceText .pending { color: var(--muted); opacity: 0.5; }
+
+  /* Game */
+  #gamePrompt {
+    font-family: ui-monospace, monospace;
+    font-size: 24px; line-height: 1.8; letter-spacing: 2px;
+    color: var(--muted);
+    word-break: break-word;
+  }
+  #gamePrompt .c { padding: 0 1px; }
+  #gamePrompt .c.done { color: var(--good); }
+  #gamePrompt .c.bad { color: var(--bad); text-decoration: underline; }
+  #gamePrompt .c.cur { color: var(--ink); background: var(--dim); border-radius: 3px; }
+  #gameStats { font-family: ui-monospace, monospace; color: var(--muted); font-size: 13px; }
+  #gameStats b { color: var(--ink); font-weight: 500; }
+  .game-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .duration-group .btn.primary { color: var(--accent); }
+
+  #refTable {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    columns: 5; column-gap: 20px; line-height: 1.9;
+    color: var(--muted);
+  }
+  #refTable b { color: var(--ink); font-weight: 500; margin-right: 6px; }
+
+  hr { border: none; border-top: 1px solid var(--dim); margin: 20px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand" data-label="MORSE"></div>
+    <div class="settings">
+      <label>wpm <input id="wpm" type="range" min="5" max="30" value="15" /><span id="wpmVal">15</span></label>
+      <label>hz <input id="freq" type="range" min="300" max="900" value="600" /><span id="freqVal">600</span></label>
+    </div>
+  </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="game" data-label="GAME"></button>
+    <button class="tab" data-tab="practice" data-label="PRACTICE"></button>
+    <button class="tab" data-tab="viz" data-label="VISUALIZE"></button>
+  </nav>
+
+  <section id="tab-viz" class="tab-panel">
+    <h2>input</h2>
+    <div class="row">
+      <input id="text" type="text" value="HELLO WORLD" maxlength="80" style="flex:1;" />
+      <button id="play" class="btn primary">play</button>
+      <button id="stop" class="btn">stop</button>
+    </div>
+
+    <h2>morse</h2>
+    <div id="morseOut"></div>
+
+    <h2>timeline</h2>
+    <canvas id="timeline" width="1200" height="60"></canvas>
+
+    <h2>tree · left=dot · right=dash</h2>
+    <div class="tree-wrap">
+      <svg id="tree" viewBox="0 0 1600 520" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+  </section>
+
+  <section id="tab-practice" class="tab-panel">
+    <div class="keypad" id="keyPad" tabindex="0">
+      <div class="dot"></div>
+      <div class="hint">hold <b style="color:var(--ink)">space</b> · short=dot · long=dash · pause=letter</div>
+    </div>
+
+    <h2>buffer</h2>
+    <div id="practiceBuffer">&nbsp;</div>
+
+    <h2>decoded</h2>
+    <div id="practiceText">&nbsp;</div>
+    <div style="margin-top:10px;">
+      <button id="clearPractice" class="btn">clear</button>
+      <button id="backspacePractice" class="btn">⌫</button>
+      <span class="stat" style="margin-left:12px;">unit <b id="statUnit">80</b>ms</span>
+      <span class="stat">last <b id="statLast">—</b>ms</span>
+    </div>
+
+    <h2>tree</h2>
+    <div class="tree-wrap">
+      <svg id="treeMini" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <h2>reference</h2>
+    <div id="refTable"></div>
+  </section>
+
+  <section id="tab-game" class="tab-panel active">
+    <div class="game-controls">
+      <span class="duration-group">
+        <button class="btn" data-dur="15">15s</button>
+        <button class="btn primary" data-dur="30">30s</button>
+        <button class="btn" data-dur="60">60s</button>
+      </span>
+      <button id="gameStart" class="btn primary" style="margin-left:12px;">start</button>
+      <button id="gameReset" class="btn">new</button>
+      <span id="gameStats" style="margin-left:auto;">
+        <b id="gameTime">30</b>s · wpm <b id="gameWpm">0</b> · acc <b id="gameAcc">100</b>%
+      </span>
+    </div>
+
+    <div class="keypad" id="gameKeyPad" tabindex="0" style="margin-top:18px;">
+      <div class="dot"></div>
+      <div class="hint">hold <b style="color:var(--ink)">space</b> to key · green path on tree = target letter</div>
+    </div>
+
+    <h2>prompt</h2>
+    <div id="gamePrompt"></div>
+
+    <h2>tree · <span style="color:var(--good)">green</span> = target</h2>
+    <div class="tree-wrap">
+      <svg id="treeGame" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+  </section>
+</div>
+
+<script>
+const MORSE = {
+  A:".-",B:"-...",C:"-.-.",D:"-..",E:".",F:"..-.",G:"--.",H:"....",I:"..",
+  J:".---",K:"-.-",L:".-..",M:"--",N:"-.",O:"---",P:".--.",Q:"--.-",R:".-.",
+  S:"...",T:"-",U:"..-",V:"...-",W:".--",X:"-..-",Y:"-.--",Z:"--..",
+  "0":"-----","1":".----","2":"..---","3":"...--","4":"....-",
+  "5":".....","6":"-....","7":"--...","8":"---..","9":"----.",
+  "⌫":"----"
+};
+const CODE_TO_CHAR = {};
+for (const [c, m] of Object.entries(MORSE)) CODE_TO_CHAR[m] = c;
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function buildTree(depth) {
+  function node(code) {
+    return {
+      code,
+      letter: CODE_TO_CHAR[code] || "",
+      left: code.length < depth ? node(code + ".") : null,
+      right: code.length < depth ? node(code + "-") : null,
+    };
+  }
+  return node("");
+}
+function layoutTree(root, depth, W, H) {
+  const leaves = [];
+  (function collect(n){ if (!n) return; if (!n.left && !n.right) { leaves.push(n); return; } collect(n.left); collect(n.right); })(root);
+  const xStep = W / (leaves.length + 1);
+  leaves.forEach((n,i) => { n.x = (i+1)*xStep; });
+  (function place(n){
+    if (!n) return 0;
+    if (!n.left && !n.right) { n.y = 30 + depth * ((H-60)/depth); return n.x; }
+    const lx = place(n.left), rx = place(n.right);
+    n.x = (lx+rx)/2;
+    n.y = 30 + n.code.length * ((H-60)/depth);
+    return n.x;
+  })(root);
+  return root;
+}
+function renderTreeInto(svgEl_, tree) {
+  svgEl_.innerHTML = "";
+  (function drawEdges(n){
+    if (!n) return;
+    for (const [child, sym] of [[n.left,"."],[n.right,"-"]]) {
+      if (!child) continue;
+      svgEl_.appendChild(svgEl("line", {x1:n.x,y1:n.y,x2:child.x,y2:child.y,class:"edge","data-code":child.code}));
+      const lbl = svgEl("text", {x:(n.x+child.x)/2 + (sym==="."?-6:6), y:(n.y+child.y)/2, class:"edge-label"});
+      lbl.textContent = sym;
+      svgEl_.appendChild(lbl);
+      drawEdges(child);
+    }
+  })(tree);
+  (function drawNodes(n){
+    if (!n) return;
+    const g = svgEl("g", {class:"node","data-code":n.code, transform:`translate(${n.x},${n.y})`});
+    const r = n.code === "" ? 10 : (n.letter ? 10 : 6);
+    g.appendChild(svgEl("circle", {r}));
+    if (n.letter) {
+      const t = svgEl("text", {}); t.textContent = n.letter; g.appendChild(t);
+    }
+    svgEl_.appendChild(g);
+    drawNodes(n.left); drawNodes(n.right);
+  })(tree);
+}
+function highlightInto(svgEl_, code, cls = "lit", nodeCls = "visited", finalCls = "current") {
+  svgEl_.querySelectorAll(".node").forEach(n => n.classList.remove(nodeCls, finalCls));
+  svgEl_.querySelectorAll(".edge").forEach(e => e.classList.remove(cls));
+  let acc = "";
+  for (const ch of code) {
+    acc += ch;
+    const edge = svgEl_.querySelector(`.edge[data-code="${acc}"]`);
+    const node = svgEl_.querySelector(`.node[data-code="${acc}"]`);
+    if (edge) edge.classList.add(cls);
+    if (node) node.classList.add(nodeCls);
+  }
+  if (code) {
+    const final = svgEl_.querySelector(`.node[data-code="${code}"]`);
+    if (final) final.classList.add(finalCls);
+  }
+}
+
+// Trees
+const bigTree = layoutTree(buildTree(4), 4, 1600, 520);
+const miniTree = layoutTree(buildTree(4), 4, 1200, 300);
+const gameTree = layoutTree(buildTree(4), 4, 1200, 300);
+renderTreeInto(document.getElementById("tree"), bigTree);
+renderTreeInto(document.getElementById("treeMini"), miniTree);
+renderTreeInto(document.getElementById("treeGame"), gameTree);
+const svgBig = document.getElementById("tree");
+const svgMini = document.getElementById("treeMini");
+const svgGame = document.getElementById("treeGame");
+
+// --- Shared settings ---
+const wpm = document.getElementById("wpm");
+const freq = document.getElementById("freq");
+const wpmVal = document.getElementById("wpmVal");
+const freqVal = document.getElementById("freqVal");
+wpm.addEventListener("input", () => { wpmVal.textContent = wpm.value; drawTimeline(); renderPractice(); });
+freq.addEventListener("input", () => { freqVal.textContent = freq.value; });
+function unitMs() { return 1200 / (+wpm.value); }
+
+// --- Audio ---
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// === VISUALIZER ===
+const textInput = document.getElementById("text");
+const morseOut = document.getElementById("morseOut");
+const playBtn = document.getElementById("play");
+const stopBtn = document.getElementById("stop");
+
+function renderMorse(text) {
+  morseOut.innerHTML = "";
+  const words = text.toUpperCase().split(/\s+/).filter(Boolean);
+  words.forEach((word, wi) => {
+    const wSpan = document.createElement("span");
+    wSpan.style.marginRight = "24px";
+    for (const ch of word) {
+      const code = MORSE[ch];
+      if (!code) continue;
+      const s = document.createElement("span");
+      s.className = "sym"; s.dataset.code = code;
+      s.textContent = code + " ";
+      wSpan.appendChild(s);
+    }
+    morseOut.appendChild(wSpan);
+  });
+}
+renderMorse(textInput.value);
+textInput.addEventListener("input", () => { renderMorse(textInput.value); drawTimeline(); });
+
+const tl = document.getElementById("timeline");
+const tlCtx = tl.getContext("2d");
+function buildSchedule(text, wpmVal) {
+  const dot = 1200 / wpmVal;
+  const events = [];
+  let t = 0;
+  const chars = [];
+  const words = text.toUpperCase().split(/\s+/).filter(Boolean);
+  words.forEach((word, wi) => {
+    for (const ch of word) if (MORSE[ch]) chars.push({ch, code: MORSE[ch]});
+    if (wi < words.length - 1) chars.push({ch:" ", code:""});
+  });
+  chars.forEach((c, ci) => {
+    if (c.ch === " ") { t += 7 * dot; return; }
+    for (let i = 0; i < c.code.length; i++) {
+      const sym = c.code[i];
+      const dur = (sym === "." ? 1 : 3) * dot;
+      events.push({t, dur, charIdx:ci, partial: c.code.slice(0, i+1)});
+      t += dur + dot;
+    }
+    t += 2 * dot;
+  });
+  return {events, totalMs: t};
+}
+function drawTimeline(highlightT = -1) {
+  const {events, totalMs} = buildSchedule(textInput.value, +wpm.value);
+  const w = tl.width, h = tl.height;
+  tlCtx.clearRect(0,0,w,h);
+  if (totalMs === 0) return;
+  const scale = w / totalMs;
+  tlCtx.fillStyle = "#7dd3fc";
+  for (const e of events) tlCtx.fillRect(e.t*scale, h*0.35, e.dur*scale, h*0.3);
+  if (highlightT >= 0) {
+    tlCtx.fillStyle = "#f472b6";
+    tlCtx.fillRect(highlightT*scale, 0, 2, h);
+  }
+}
+
+let vizOsc = null, vizGain = null, vizRaf = null, vizTimeouts = [];
+function stopViz() {
+  vizTimeouts.forEach(clearTimeout); vizTimeouts = [];
+  if (vizRaf) cancelAnimationFrame(vizRaf); vizRaf = null;
+  if (vizOsc) { try { vizOsc.stop(); } catch(e){} vizOsc.disconnect(); vizOsc = null; }
+  if (vizGain) { vizGain.disconnect(); vizGain = null; }
+  highlightInto(svgBig, "");
+  morseOut.querySelectorAll(".sym").forEach(s => s.classList.remove("active"));
+  drawTimeline();
+  playBtn.disabled = false;
+}
+stopBtn.addEventListener("click", stopViz);
+
+function playViz() {
+  stopViz();
+  ensureAudio();
+  const {events, totalMs} = buildSchedule(textInput.value, +wpm.value);
+  if (events.length === 0) return;
+  playBtn.disabled = true;
+  const startAt = audioCtx.currentTime + 0.05;
+  const startPerf = performance.now() + 50;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine"; osc.frequency.value = +freq.value;
+  gain.gain.setValueAtTime(0, startAt);
+  osc.connect(gain).connect(audioCtx.destination);
+  for (const e of events) {
+    const t0 = startAt + e.t/1000, t1 = t0 + e.dur/1000;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(0.22, t0 + 0.005);
+    gain.gain.setValueAtTime(0.22, t1 - 0.005);
+    gain.gain.linearRampToValueAtTime(0, t1);
+  }
+  osc.start(startAt);
+  osc.stop(startAt + totalMs/1000 + 0.1);
+  vizOsc = osc; vizGain = gain;
+
+  const symEls = morseOut.querySelectorAll(".sym");
+  const charToEl = [];
+  const words = textInput.value.toUpperCase().split(/\s+/).filter(Boolean);
+  let ei = 0;
+  words.forEach((word, wi) => {
+    for (const ch of word) if (MORSE[ch]) charToEl.push(symEls[ei++]);
+    if (wi < words.length - 1) charToEl.push(null);
+  });
+
+  function tick() {
+    const elapsed = performance.now() - startPerf;
+    if (elapsed > totalMs + 100) { stopViz(); return; }
+    let active = null;
+    for (const e of events) if (elapsed >= e.t && elapsed < e.t + e.dur) { active = e; break; }
+    morseOut.querySelectorAll(".sym.active").forEach(s => s.classList.remove("active"));
+    if (active) {
+      const el = charToEl[active.charIdx]; if (el) el.classList.add("active");
+      highlightInto(svgBig, active.partial);
+    }
+    drawTimeline(elapsed);
+    vizRaf = requestAnimationFrame(tick);
+  }
+  vizRaf = requestAnimationFrame(tick);
+  vizTimeouts.push(setTimeout(stopViz, totalMs + 200));
+}
+playBtn.addEventListener("click", playViz);
+drawTimeline();
+
+// === TABS ===
+const tabs = document.querySelectorAll(".tab");
+document.querySelectorAll("[data-label]").forEach(host => {
+  const label = host.dataset.label || "";
+  host.innerHTML = "";
+  [...label].forEach((ch, i) => {
+    const code = MORSE[ch] || " ";
+    const slot = document.createElement("span");
+    slot.className = "slot";
+    slot.style.setProperty("--i", i);
+    const m = document.createElement("span");
+    m.className = "m"; m.textContent = code;
+    const e = document.createElement("span");
+    e.className = "e"; e.textContent = ch;
+    slot.appendChild(m); slot.appendChild(e);
+    host.appendChild(slot);
+  });
+});
+tabs.forEach(tab => {
+  tab.addEventListener("click", () => {
+    tabs.forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+    ensureAudio(); // warm up on first tab interaction
+    if (tab.dataset.tab === "practice") document.getElementById("keyPad").focus();
+    if (tab.dataset.tab === "game") document.getElementById("gameKeyPad").focus();
+  });
+});
+function activeTab() {
+  return document.querySelector(".tab.active").dataset.tab;
+}
+
+// === KEYING ENGINE (shared by practice + game) ===
+// A single physical key — we route the decoded symbol/letter to a sink depending on active tab.
+let keyIsDown = false;
+let keyDownAt = 0;
+let keyOsc = null, keyGain = null;
+let curCode = "";
+let letterTimer = null;
+
+function startTone() {
+  ensureAudio();
+  stopTone();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine"; osc.frequency.value = +freq.value;
+  const now = audioCtx.currentTime;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.22, now + 0.005);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+  keyOsc = osc; keyGain = gain;
+}
+function stopTone() {
+  if (!keyOsc) return;
+  const now = audioCtx.currentTime;
+  keyGain.gain.cancelScheduledValues(now);
+  keyGain.gain.setValueAtTime(keyGain.gain.value, now);
+  keyGain.gain.linearRampToValueAtTime(0, now + 0.01);
+  keyOsc.stop(now + 0.02);
+  keyOsc = null; keyGain = null;
+}
+
+function currentKeyPad() {
+  if (activeTab() === "game") return document.getElementById("gameKeyPad");
+  return document.getElementById("keyPad");
+}
+
+function pressDown() {
+  if (keyIsDown) return;
+  const tab = activeTab();
+  if (tab !== "practice" && tab !== "game") return;
+  if (tab === "game" && !game.running) return; // only key during a running game
+  keyIsDown = true;
+  clearTimeout(letterTimer);
+  keyDownAt = performance.now();
+  currentKeyPad().classList.add("down");
+  startTone();
+}
+function pressUp() {
+  if (!keyIsDown) return;
+  keyIsDown = false;
+  const held = performance.now() - keyDownAt;
+  document.getElementById("keyPad").classList.remove("down");
+  document.getElementById("gameKeyPad").classList.remove("down");
+  stopTone();
+  const u = unitMs();
+  const sym = held < u * 2 ? "." : "-";
+  curCode += sym;
+  onSymbol(sym, held);
+  // Letter gap: canonical 3 units of silence.
+  letterTimer = setTimeout(commitLetter, u * 3);
+}
+function commitLetter() {
+  if (!curCode) return;
+  const code = curCode;
+  curCode = "";
+  onLetter(code);
+}
+
+// Route to the current mode.
+function onSymbol(sym, heldMs) {
+  if (activeTab() === "practice") practiceOnSymbol(sym, heldMs);
+  else if (activeTab() === "game") gameOnSymbol(sym);
+}
+function onLetter(code) {
+  if (activeTab() === "practice") practiceOnLetter(code);
+  else if (activeTab() === "game") gameOnLetter(code);
+}
+
+// Robust key release: keyup anywhere, or focus/visibility loss, always ends the press.
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space") return;
+  if (document.activeElement && document.activeElement.tagName === "INPUT") return;
+  if (activeTab() !== "practice" && activeTab() !== "game") return;
+  e.preventDefault();
+  if (e.repeat) return;
+  pressDown();
+});
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space") return;
+  if (keyIsDown) { e.preventDefault(); pressUp(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Enter" || e.code === "NumpadEnter") {
+    if (document.activeElement && document.activeElement.tagName === "INPUT") return;
+    if (activeTab() !== "game") return;
+    if (game.running) return;
+    e.preventDefault();
+    startGame();
+    return;
+  }
+  if (e.code !== "Backspace" && e.code !== "Delete") return;
+  if (document.activeElement && document.activeElement.tagName === "INPUT") return;
+  if (activeTab() !== "practice") return;
+  e.preventDefault();
+  document.getElementById("backspacePractice").click();
+});
+window.addEventListener("blur", () => { if (keyIsDown) pressUp(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && keyIsDown) pressUp(); });
+
+// Pad pointer support (both pads).
+function bindPad(pad) {
+  pad.addEventListener("mousedown", (e) => { e.preventDefault(); pressDown(); });
+  pad.addEventListener("mouseup", pressUp);
+  pad.addEventListener("mouseleave", () => { if (keyIsDown) pressUp(); });
+  pad.addEventListener("touchstart", (e) => { e.preventDefault(); pressDown(); }, {passive:false});
+  pad.addEventListener("touchend", (e) => { e.preventDefault(); pressUp(); });
+}
+bindPad(document.getElementById("keyPad"));
+bindPad(document.getElementById("gameKeyPad"));
+
+// === PRACTICE ===
+const practiceBuffer = document.getElementById("practiceBuffer");
+const practiceText = document.getElementById("practiceText");
+const statUnit = document.getElementById("statUnit");
+const statLast = document.getElementById("statLast");
+let decodedText = "";
+let wordTimer = null;
+
+function renderPractice() {
+  practiceBuffer.textContent = curCode || " ";
+  const pending = curCode ? `<span class="pending">${CODE_TO_CHAR[curCode] || "?"}</span>` : "";
+  practiceText.innerHTML = (decodedText || "") + pending || "&nbsp;";
+  statUnit.textContent = Math.round(unitMs());
+  if (activeTab() === "practice") highlightInto(svgMini, curCode);
+}
+function practiceOnSymbol(sym, heldMs) {
+  statLast.textContent = Math.round(heldMs);
+  clearTimeout(wordTimer);
+  renderPractice();
+}
+function practiceOnLetter(code) {
+  if (code === "----") {
+    decodedText = decodedText.slice(0, -1);
+  } else {
+    decodedText += CODE_TO_CHAR[code] || "■";
+  }
+  renderPractice();
+  clearTimeout(wordTimer);
+  wordTimer = setTimeout(() => {
+    if (decodedText && !decodedText.endsWith(" ")) { decodedText += " "; renderPractice(); }
+  }, unitMs() * 4); // 4 more units after letter commit ≈ 7 total
+}
+document.getElementById("clearPractice").addEventListener("click", () => {
+  decodedText = ""; curCode = "";
+  clearTimeout(letterTimer); clearTimeout(wordTimer);
+  renderPractice();
+});
+document.getElementById("backspacePractice").addEventListener("click", () => {
+  curCode = "";
+  if (decodedText) decodedText = decodedText.slice(0, -1);
+  renderPractice();
+});
+renderPractice();
+
+// Reference table.
+document.getElementById("refTable").innerHTML = Object.entries(MORSE)
+  .filter(([k]) => /[A-Z]/.test(k) || k === "⌫")
+  .map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join("");
+
+// === GAME ===
+const WORDS = ("the of and to in a is that it for on with as was at by an be this which or from had not but have you they his her all one will can more about if when what so up out do no time some my than who its them these been two many like into over only year after our work most new well over back even any new life most man day way").split(" ");
+
+const gamePrompt = document.getElementById("gamePrompt");
+const gameStart = document.getElementById("gameStart");
+const gameReset = document.getElementById("gameReset");
+const gameTime = document.getElementById("gameTime");
+const gameWpm = document.getElementById("gameWpm");
+const gameAcc = document.getElementById("gameAcc");
+const durButtons = document.querySelectorAll(".duration-group .btn");
+
+const game = {
+  running: false,
+  duration: 30,
+  target: "",
+  idx: 0,
+  correct: 0,
+  typed: 0,
+  startPerf: 0,
+  tickId: null,
+  marks: [], // per-char: 'ok' | 'bad' | null
+};
+
+function newPrompt() {
+  const pool = [];
+  while (pool.join(" ").length < 160) {
+    pool.push(WORDS[Math.floor(Math.random()*WORDS.length)].toUpperCase());
+  }
+  game.target = pool.join(" ");
+  game.idx = 0;
+  game.correct = 0;
+  game.typed = 0;
+  game.marks = new Array(game.target.length).fill(null);
+  renderGame();
+  highlightTarget();
+}
+
+function renderGame() {
+  const t = game.target;
+  let html = "";
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i] === " " ? "·" : t[i];
+    let cls = "c";
+    if (i < game.idx) cls += game.marks[i] === "ok" ? " done" : " bad";
+    else if (i === game.idx) cls += " cur";
+    html += `<span class="${cls}">${ch}</span>`;
+  }
+  gamePrompt.innerHTML = html;
+  gameTime.textContent = game.running
+    ? Math.max(0, game.duration - Math.floor((performance.now() - game.startPerf)/1000))
+    : game.duration;
+  const elapsedMin = Math.max(0.0001, (performance.now() - game.startPerf) / 60000);
+  const wpm = game.running ? Math.round((game.correct / 5) / elapsedMin) : 0;
+  const acc = game.typed === 0 ? 100 : Math.round((game.correct / game.typed) * 100);
+  gameWpm.textContent = game.running ? wpm : 0;
+  gameAcc.textContent = acc;
+}
+
+function highlightTarget() {
+  // Ghost path on the game tree for the current target letter.
+  svgGame.querySelectorAll(".node.target").forEach(n => n.classList.remove("target"));
+  svgGame.querySelectorAll(".edge.target").forEach(e => e.classList.remove("target"));
+  const ch = game.target[game.idx];
+  if (!ch || ch === " ") return;
+  const code = MORSE[ch];
+  if (!code) return;
+  let acc = "";
+  for (const s of code) {
+    acc += s;
+    const edge = svgGame.querySelector(`.edge[data-code="${acc}"]`);
+    if (edge) edge.classList.add("target");
+  }
+  const finalN = svgGame.querySelector(`.node[data-code="${code}"]`);
+  if (finalN) finalN.classList.add("target");
+}
+
+function gameOnSymbol(sym) {
+  if (activeTab() === "game") highlightInto(svgGame, curCode);
+}
+
+function gameOnLetter(code) {
+  if (!game.running) return;
+  const expected = game.target[game.idx];
+  if (expected === " ") {
+    // Auto-advance past spaces when the user successfully completes a word (i.e. any letter commit that matches the next char).
+    // Simpler rule: if we're on a space, advance space first.
+    game.idx++;
+  }
+  const target = game.target[game.idx];
+  const got = CODE_TO_CHAR[code];
+  game.typed++;
+  if (got && got === target) {
+    game.marks[game.idx] = "ok";
+    game.correct++;
+  } else {
+    game.marks[game.idx] = "bad";
+  }
+  game.idx++;
+  // Skip past spaces in the display.
+  while (game.target[game.idx] === " ") game.idx++;
+  if (game.idx >= game.target.length) newPrompt();
+  highlightInto(svgGame, ""); // clear user path
+  highlightTarget();
+  renderGame();
+}
+
+function startGame() {
+  if (game.running) return;
+  ensureAudio();
+  newPrompt();
+  game.running = true;
+  game.startPerf = performance.now();
+  gameStart.disabled = true;
+  gameStart.textContent = "running";
+  const loop = () => {
+    const elapsed = (performance.now() - game.startPerf) / 1000;
+    if (elapsed >= game.duration) { endGame(); return; }
+    renderGame();
+    game.tickId = requestAnimationFrame(loop);
+  };
+  loop();
+}
+function endGame() {
+  game.running = false;
+  if (game.tickId) cancelAnimationFrame(game.tickId);
+  game.tickId = null;
+  gameStart.disabled = false;
+  gameStart.textContent = "start";
+  if (keyIsDown) pressUp();
+  renderGame();
+}
+function resetGame() {
+  endGame();
+  newPrompt();
+}
+
+gameStart.addEventListener("click", startGame);
+gameReset.addEventListener("click", resetGame);
+durButtons.forEach(b => {
+  b.addEventListener("click", () => {
+    durButtons.forEach(x => x.classList.remove("primary"));
+    b.classList.add("primary");
+    game.duration = +b.dataset.dur;
+    if (!game.running) gameTime.textContent = game.duration;
+  });
+});
+
+newPrompt();
+</script>
+</body>
+</html>
