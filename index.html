@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0e0e10" />
 <title>morse</title>
 <style>
   :root {
@@ -16,6 +18,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  body { overscroll-behavior: contain; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
     background: var(--bg);
@@ -24,6 +27,11 @@
     font-size: 14px;
   }
   .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 48px; }
+  @supports (padding: max(0px)) {
+    .wrap { padding-left: max(24px, env(safe-area-inset-left));
+            padding-right: max(24px, env(safe-area-inset-right));
+            padding-bottom: max(48px, env(safe-area-inset-bottom)); }
+  }
 
   .top {
     display: flex;
@@ -144,13 +152,16 @@
   .edge.lit { stroke: var(--accent); stroke-width: 1.5; }
   .edge.target { stroke: var(--good); stroke-width: 1.2; stroke-dasharray: 3 3; }
   .edge-label { fill: var(--muted); font: 9px ui-monospace, monospace; text-anchor: middle; opacity: 0.5; }
-  #timeline { background: transparent; border-radius: 4px; }
+  #timeline { background: transparent; border-radius: 4px; width: 100%; max-width: 100%; height: auto; }
 
   /* Key pad: minimal dot */
   .keypad {
-    user-select: none; cursor: pointer;
+    user-select: none; -webkit-user-select: none; cursor: pointer;
     display: inline-flex; align-items: center; gap: 12px;
     padding: 10px 0;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
   }
   .keypad .dot {
     width: 14px; height: 14px; border-radius: 50%;
@@ -228,6 +239,51 @@
   #refTable b { color: var(--ink); font-weight: 500; margin-right: 6px; }
 
   hr { border: none; border-top: 1px solid var(--dim); margin: 20px 0; }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 20px 16px 32px; }
+    .top { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 20px; }
+    .settings { flex-wrap: wrap; gap: 12px 20px; }
+    .settings input[type="range"] { width: 120px; }
+    .tabs { gap: 18px; margin-bottom: 22px; }
+    .tab .slot .e, .brand .slot .e { font-size: 12px; }
+
+    #refTable { columns: 2; column-gap: 16px; font-size: 13px; }
+
+    /* Beefier tap target on mobile without changing the visual dot much. */
+    .keypad {
+      width: 100%;
+      padding: 22px 14px;
+      gap: 14px;
+      border: 1px solid var(--dim);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+      min-height: 72px;
+    }
+    .keypad.down { border-color: var(--hot); }
+    .keypad .dot { width: 20px; height: 20px; }
+    .keypad .hint { font-size: 12px; line-height: 1.4; }
+
+    #practiceBuffer { font-size: 24px; letter-spacing: 4px; }
+    #practiceText { font-size: 16px; }
+    #gamePrompt { font-size: 18px; letter-spacing: 1px; line-height: 1.7; }
+    #gameOverlay .big { font-size: 48px; }
+
+    .game-controls { gap: 6px; }
+    .game-controls .btn { padding: 8px 12px; font-size: 13px; }
+    #gameStats { width: 100%; margin-left: 0 !important; margin-top: 4px; font-size: 12px; }
+
+    /* Visualizer row stacks so the text input isn't crushed. */
+    #tab-viz .row { flex-direction: column; align-items: stretch; gap: 12px; }
+    #tab-viz .row .btn { align-self: flex-start; }
+
+    .tree-wrap svg { min-height: 240px; }
+  }
+
+  @media (max-width: 380px) {
+    #refTable { columns: 2; }
+    .tabs { gap: 14px; }
+  }
 </style>
 </head>
 <body>
@@ -249,7 +305,8 @@
   <section id="tab-viz" class="tab-panel">
     <h2>input</h2>
     <div class="row">
-      <input id="text" type="text" value="HELLO WORLD" maxlength="80" style="flex:1;" />
+      <input id="text" type="text" value="HELLO WORLD" maxlength="80" style="flex:1;"
+             autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" />
       <button id="play" class="btn primary">play</button>
       <button id="stop" class="btn">stop</button>
     </div>
@@ -568,6 +625,13 @@ function playViz() {
 playBtn.addEventListener("click", playViz);
 drawTimeline();
 
+// Redraw the timeline when the viewport changes (mainly orientation on mobile).
+let resizeRaf = 0;
+window.addEventListener("resize", () => {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; drawTimeline(); });
+});
+
 // === TABS ===
 const tabs = document.querySelectorAll(".tab");
 document.querySelectorAll("[data-label]").forEach(host => {
@@ -712,11 +776,32 @@ document.addEventListener("visibilitychange", () => { if (document.hidden && key
 
 // Pad pointer support (both pads).
 function bindPad(pad) {
-  pad.addEventListener("mousedown", (e) => { e.preventDefault(); pressDown(); });
-  pad.addEventListener("mouseup", pressUp);
-  pad.addEventListener("mouseleave", () => { if (keyIsDown) pressUp(); });
-  pad.addEventListener("touchstart", (e) => { e.preventDefault(); pressDown(); }, {passive:false});
-  pad.addEventListener("touchend", (e) => { e.preventDefault(); pressUp(); });
+  // After any touch event on this pad, ignore mouse events for a window
+  // long enough to swallow synthesized mousedown/mouseup from browsers
+  // that still emit them despite `touch-action: manipulation`.
+  let touchBlockUntil = 0;
+  const touching = () => performance.now() < touchBlockUntil;
+  const bumpBlock = () => { touchBlockUntil = performance.now() + 600; };
+
+  pad.addEventListener("mousedown", (e) => {
+    if (touching()) return;
+    e.preventDefault(); pressDown();
+  });
+  pad.addEventListener("mouseup", () => { if (!touching()) pressUp(); });
+  pad.addEventListener("mouseleave", () => { if (!touching() && keyIsDown) pressUp(); });
+
+  pad.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    bumpBlock();
+    pressDown();
+  }, {passive:false});
+  const endTouch = (e) => {
+    e.preventDefault();
+    bumpBlock();
+    pressUp();
+  };
+  pad.addEventListener("touchend", endTouch);
+  pad.addEventListener("touchcancel", endTouch);
 }
 bindPad(document.getElementById("keyPad"));
 bindPad(document.getElementById("gameKeyPad"));
@@ -992,10 +1077,11 @@ gameStart.addEventListener("click", startGame);
 gameReset.addEventListener("click", resetGame);
 durButtons.forEach(b => {
   b.addEventListener("click", () => {
+    if (game.running || game.counting) return;
     durButtons.forEach(x => x.classList.remove("primary"));
     b.classList.add("primary");
     game.duration = +b.dataset.dur;
-    if (!game.running) gameTime.textContent = game.duration;
+    gameTime.textContent = game.duration;
   });
 });
 
