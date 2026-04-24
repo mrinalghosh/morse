@@ -191,6 +191,32 @@
   #gamePrompt .c.cur { color: var(--ink); background: var(--dim); border-radius: 3px; }
   #gameStats { font-family: ui-monospace, monospace; color: var(--muted); font-size: 13px; }
   #gameStats b { color: var(--ink); font-weight: 500; }
+
+  #gamePromptWrap { position: relative; }
+  #gameOverlay {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(14,14,16,0.85);
+    border-radius: 4px;
+    z-index: 2;
+    pointer-events: none;
+    font-family: ui-monospace, monospace;
+    text-align: center;
+  }
+  #gameOverlay.show { display: flex; }
+  #gameOverlay .big {
+    font-size: 64px; color: var(--accent); font-weight: 500;
+    animation: pop 0.6s ease;
+  }
+  #gameOverlay.done .big { color: var(--good); font-size: 28px; letter-spacing: 4px; text-transform: uppercase; }
+  #gameOverlay .sub { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  @keyframes pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    40% { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .gameStart-running { color: var(--hot) !important; border-color: var(--hot) !important; }
   .game-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .duration-group .btn.primary { color: var(--accent); }
 
@@ -287,7 +313,10 @@
     </div>
 
     <h2>prompt</h2>
-    <div id="gamePrompt"></div>
+    <div id="gamePromptWrap">
+      <div id="gamePrompt"></div>
+      <div id="gameOverlay"><div><div class="big" id="gameOverlayBig"></div><div class="sub" id="gameOverlaySub"></div></div></div>
+    </div>
 
     <h2>tree · <span style="color:var(--good)">green</span> = target</h2>
     <div class="tree-wrap">
@@ -667,7 +696,7 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Enter" || e.code === "NumpadEnter") {
     if (document.activeElement && document.activeElement.tagName === "INPUT") return;
     if (activeTab() !== "game") return;
-    if (game.running) return;
+    if (game.running || game.counting) return;
     e.preventDefault();
     startGame();
     return;
@@ -754,6 +783,7 @@ const durButtons = document.querySelectorAll(".duration-group .btn");
 
 const game = {
   running: false,
+  counting: false,
   duration: 30,
   target: "",
   idx: 0,
@@ -761,8 +791,27 @@ const game = {
   typed: 0,
   startPerf: 0,
   tickId: null,
+  countdownTimers: [],
   marks: [], // per-char: 'ok' | 'bad' | null
 };
+
+const gameOverlay = document.getElementById("gameOverlay");
+const gameOverlayBig = document.getElementById("gameOverlayBig");
+const gameOverlaySub = document.getElementById("gameOverlaySub");
+
+function showOverlay(text, sub = "", done = false) {
+  gameOverlayBig.textContent = text;
+  gameOverlaySub.textContent = sub;
+  gameOverlay.classList.toggle("done", done);
+  gameOverlay.classList.add("show");
+  // retrigger pop animation
+  gameOverlayBig.style.animation = "none";
+  gameOverlayBig.offsetHeight;
+  gameOverlayBig.style.animation = "";
+}
+function hideOverlay() {
+  gameOverlay.classList.remove("show", "done");
+}
 
 function newPrompt() {
   const pool = [];
@@ -847,33 +896,95 @@ function gameOnLetter(code) {
   renderGame();
 }
 
+function beepCountdown(isGo) {
+  try {
+    ensureAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = isGo ? (+freq.value * 1.5) : +freq.value;
+    const now = audioCtx.currentTime;
+    const dur = isGo ? 0.25 : 0.08;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.005);
+    gain.gain.setValueAtTime(0.18, now + dur - 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  } catch(e){}
+}
+
 function startGame() {
-  if (game.running) return;
+  if (game.running || game.counting) return;
   ensureAudio();
   newPrompt();
+  hideOverlay();
+  game.counting = true;
+  gameStart.disabled = true;
+  gameStart.textContent = "…";
+  gameStart.classList.add("gameStart-running");
+
+  const seq = [
+    { at: 0,    text: "3", beep: false },
+    { at: 800,  text: "2", beep: false },
+    { at: 1600, text: "1", beep: false },
+    { at: 2400, text: "GO", beep: true  },
+  ];
+  game.countdownTimers = [];
+  seq.forEach(s => {
+    game.countdownTimers.push(setTimeout(() => {
+      showOverlay(s.text);
+      beepCountdown(s.beep);
+    }, s.at));
+  });
+  game.countdownTimers.push(setTimeout(() => {
+    hideOverlay();
+    beginGameRun();
+  }, 3000));
+}
+
+function beginGameRun() {
+  game.counting = false;
   game.running = true;
   game.startPerf = performance.now();
-  gameStart.disabled = true;
   gameStart.textContent = "running";
   const loop = () => {
     const elapsed = (performance.now() - game.startPerf) / 1000;
-    if (elapsed >= game.duration) { endGame(); return; }
+    if (elapsed >= game.duration) { endGame(true); return; }
     renderGame();
     game.tickId = requestAnimationFrame(loop);
   };
   loop();
 }
-function endGame() {
+
+function cancelCountdown() {
+  game.counting = false;
+  game.countdownTimers.forEach(clearTimeout);
+  game.countdownTimers = [];
+}
+
+function endGame(showDone = false) {
+  const wasRunning = game.running;
+  cancelCountdown();
   game.running = false;
   if (game.tickId) cancelAnimationFrame(game.tickId);
   game.tickId = null;
   gameStart.disabled = false;
   gameStart.textContent = "start";
+  gameStart.classList.remove("gameStart-running");
   if (keyIsDown) pressUp();
   renderGame();
+  if (showDone && wasRunning) {
+    const wpmTxt = gameWpm.textContent;
+    const accTxt = gameAcc.textContent;
+    showOverlay("done", `${wpmTxt} wpm · ${accTxt}% acc`, true);
+    beepCountdown(true);
+  }
 }
 function resetGame() {
-  endGame();
+  endGame(false);
+  hideOverlay();
   newPrompt();
 }
 
