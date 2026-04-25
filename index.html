@@ -45,9 +45,27 @@
     font-size: 13px;
     letter-spacing: 3px;
   }
-  .settings { display: flex; gap: 16px; align-items: center; color: var(--muted); font-size: 12px; }
-  .settings input[type="range"] { width: 80px; accent-color: var(--accent); }
-  #wpmLabel.hidden { display: none; }
+  .settings { position: relative; display: flex; gap: 16px; align-items: center; color: var(--muted); font-size: 12px; }
+  .settings input[type="range"] { width: 120px; accent-color: var(--accent); }
+  .gear-btn {
+    background: none; border: 1px solid var(--dim); border-radius: 4px;
+    color: var(--muted); cursor: pointer; padding: 4px 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .gear-btn:hover, .gear-btn.open { color: var(--accent); border-color: var(--accent); }
+  .gear-btn svg { width: 14px; height: 14px; display: block; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .settings-pop {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: var(--bg); border: 1px solid var(--dim); border-radius: 6px;
+    padding: 12px 14px; display: none; flex-direction: column; gap: 10px;
+    z-index: 10; min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .settings-pop.open { display: flex; }
+  .settings-pop label { display: flex; align-items: center; gap: 8px; }
+  .settings-pop label span.k { width: 28px; color: var(--muted); }
+  .settings-pop label span.v { width: 32px; text-align: right; color: var(--ink); font-family: ui-monospace, monospace; }
+  .settings-pop .hint { color: var(--muted); font-size: 11px; line-height: 1.4; margin: -4px 0 2px 36px; }
 
   .tabs {
     display: flex;
@@ -262,6 +280,7 @@
   .gameStart-running { color: var(--hot) !important; border-color: var(--hot) !important; }
   .game-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .duration-group .btn.primary { color: var(--accent); }
+  #hardToggle.btn.primary { color: var(--hot); border-color: var(--hot); }
 
   #refTable {
     font-family: ui-monospace, monospace; font-size: 12px;
@@ -345,8 +364,15 @@
   <div class="top">
     <div class="brand" data-label="MORSE"></div>
     <div class="settings">
-      <label id="wpmLabel">wpm <input id="wpm" type="range" min="5" max="30" value="15" /><span id="wpmVal">15</span></label>
-      <label>hz <input id="freq" type="range" min="300" max="900" value="600" /><span id="freqVal">600</span></label>
+      <button id="gearBtn" class="gear-btn" aria-label="settings" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+      <div id="settingsPop" class="settings-pop" role="dialog" aria-label="settings">
+        <label title="words per minute — sets dot/dash unit length for keying & playback"><span class="k">wpm</span><input id="wpm" type="range" min="5" max="30" value="15" /><span class="v" id="wpmVal">15</span></label>
+        <div class="hint">sets dot/dash timing for keying & playback</div>
+        <label title="tone pitch in hertz"><span class="k">hz</span><input id="freq" type="range" min="300" max="900" value="600" /><span class="v" id="freqVal">600</span></label>
+        <div class="hint">tone pitch</div>
+      </div>
     </div>
   </div>
 
@@ -724,13 +750,28 @@ tabs.forEach(tab => {
     ensureAudio(); // warm up on first tab interaction
     if (tab.dataset.tab === "practice") document.getElementById("keyPad").focus();
     if (tab.dataset.tab === "game") document.getElementById("gameKeyPad").focus();
-    syncWpmVisibility();
   });
 });
-function syncWpmVisibility() {
-  document.getElementById("wpmLabel").classList.toggle("hidden", activeTab() !== "viz");
+
+const gearBtn = document.getElementById("gearBtn");
+const settingsPop = document.getElementById("settingsPop");
+function setSettingsOpen(open) {
+  settingsPop.classList.toggle("open", open);
+  gearBtn.classList.toggle("open", open);
+  gearBtn.setAttribute("aria-expanded", open ? "true" : "false");
 }
-syncWpmVisibility();
+gearBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setSettingsOpen(!settingsPop.classList.contains("open"));
+});
+document.addEventListener("click", (e) => {
+  if (!settingsPop.classList.contains("open")) return;
+  if (settingsPop.contains(e.target) || gearBtn.contains(e.target)) return;
+  setSettingsOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && settingsPop.classList.contains("open")) setSettingsOpen(false);
+});
 function activeTab() {
   return document.querySelector(".tab.active").dataset.tab;
 }
