@@ -170,7 +170,7 @@
   .edge { stroke: #585862; stroke-width: 1.25; fill: none; transition: stroke 0.1s, stroke-width 0.1s; }
   .edge.lit { stroke: var(--accent); stroke-width: 1.75; }
   .edge.target { stroke: var(--good); stroke-width: 1.5; stroke-dasharray: 3 3; }
-  .edge-label { fill: #b8b8c0; font: 9px ui-monospace, monospace; text-anchor: middle; opacity: 0.95; }
+  .edge-label { fill: var(--ink); font: 700 13px ui-monospace, monospace; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
   #timeline { background: transparent; border-radius: 4px; width: 100%; max-width: 100%; height: auto; }
 
   /* Key pad: minimal dot */
@@ -445,6 +445,7 @@
       </span>
       <button id="gameStart" class="btn primary" style="margin-left:12px;">start</button>
       <button id="gameReset" class="btn">new</button>
+      <button id="hardToggle" class="btn" title="hard mode hides the green target path on the tree" aria-pressed="false">hard</button>
       <span id="gameStats" style="margin-left:auto;">
         <b id="gameTime">30</b>s · wpm <b id="gameWpm">0</b> · acc <b id="gameAcc">100</b>%
       </span>
@@ -461,7 +462,7 @@
       <div id="gameOverlay"><div><div class="big" id="gameOverlayBig"></div><div class="sub" id="gameOverlaySub"></div></div></div>
     </div>
 
-    <h2>tree · <span style="color:var(--good)">green</span> = target</h2>
+    <h2 id="gameTreeHeading">tree · <span style="color:var(--good)">green</span> = target</h2>
     <div class="tree-wrap">
       <svg id="treeGame" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
@@ -487,8 +488,17 @@ function svgEl(tag, attrs) {
   return e;
 }
 
+const LETTER_CODES = new Set(
+  Object.entries(MORSE).filter(([k]) => /^[A-Z]$/.test(k)).map(([, v]) => v)
+);
+function codeLeadsToLetter(code, depth) {
+  if (code.length > depth) return false;
+  for (const lc of LETTER_CODES) if (lc === code || lc.startsWith(code)) return true;
+  return false;
+}
 function buildTree(depth) {
   function node(code) {
+    if (!codeLeadsToLetter(code, depth)) return null;
     return {
       code,
       letter: CODE_TO_CHAR[code] || "",
@@ -504,11 +514,13 @@ function layoutTree(root, depth, W, H) {
   const xStep = W / (leaves.length + 1);
   leaves.forEach((n,i) => { n.x = (i+1)*xStep; });
   (function place(n){
-    if (!n) return 0;
-    if (!n.left && !n.right) { n.y = 30 + depth * ((H-60)/depth); return n.x; }
-    const lx = place(n.left), rx = place(n.right);
-    n.x = (lx+rx)/2;
+    if (!n) return null;
     n.y = 30 + n.code.length * ((H-60)/depth);
+    if (!n.left && !n.right) return n.x;
+    const lx = place(n.left), rx = place(n.right);
+    if (lx !== null && rx !== null) n.x = (lx + rx) / 2;
+    else if (lx !== null) n.x = lx + xStep / 2; // only dot child: lean right
+    else n.x = rx - xStep / 2;                  // only dash child: lean left
     return n.x;
   })(root);
   return root;
@@ -520,8 +532,8 @@ function renderTreeInto(svgEl_, tree) {
     for (const [child, sym] of [[n.left,"."],[n.right,"-"]]) {
       if (!child) continue;
       svgEl_.appendChild(svgEl("line", {x1:n.x,y1:n.y,x2:child.x,y2:child.y,class:"edge","data-code":child.code}));
-      const lbl = svgEl("text", {x:(n.x+child.x)/2 + (sym==="."?-6:6), y:(n.y+child.y)/2, class:"edge-label"});
-      lbl.textContent = sym;
+      const lbl = svgEl("text", {x:(n.x+child.x)/2 + (sym==="."?-9:9), y:(n.y+child.y)/2, class:"edge-label"});
+      lbl.textContent = sym === "." ? "•" : "—";
       svgEl_.appendChild(lbl);
       drawEdges(child);
     }
@@ -1061,6 +1073,7 @@ const game = {
   tickId: null,
   countdownTimers: [],
   marks: [], // per-char: 'ok' | 'bad' | null
+  hard: false,
 };
 
 const gameOverlay = document.getElementById("gameOverlay");
@@ -1127,6 +1140,7 @@ function highlightTarget() {
   // Ghost path on the game tree for the current target letter.
   svgGame.querySelectorAll(".node.target").forEach(n => n.classList.remove("target"));
   svgGame.querySelectorAll(".edge.target").forEach(e => e.classList.remove("target"));
+  if (game.hard) return;
   const ch = game.target[game.idx];
   if (!ch || ch === " ") return;
   const code = MORSE[ch];
@@ -1284,6 +1298,28 @@ function resetGame() {
 
 gameStart.addEventListener("click", startGame);
 gameReset.addEventListener("click", resetGame);
+
+const hardToggle = document.getElementById("hardToggle");
+const gameTreeHeading = document.getElementById("gameTreeHeading");
+const gameKeyHint = document.querySelector("#gameKeyPad .hint");
+const gameKeyHintDefault = gameKeyHint.innerHTML;
+function applyHardMode() {
+  hardToggle.classList.toggle("primary", game.hard);
+  hardToggle.setAttribute("aria-pressed", game.hard ? "true" : "false");
+  gameTreeHeading.innerHTML = game.hard
+    ? 'tree · <span style="color:var(--hot)">hard mode</span> · target hidden'
+    : 'tree · <span style="color:var(--good)">green</span> = target';
+  gameKeyHint.innerHTML = game.hard
+    ? (matchMedia("(pointer: coarse)").matches
+        ? 'tap &amp; hold to key · <span style="color:var(--hot)">hard mode</span> · no hints'
+        : 'hold <b style="color:var(--ink)">space</b> to key · <span style="color:var(--hot)">hard mode</span> · no hints')
+    : gameKeyHintDefault;
+  highlightTarget();
+}
+hardToggle.addEventListener("click", () => {
+  game.hard = !game.hard;
+  applyHardMode();
+});
 durButtons.forEach(b => {
   b.addEventListener("click", () => {
     if (game.running || game.counting) return;
