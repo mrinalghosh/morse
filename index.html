@@ -392,6 +392,7 @@
         <button class="btn" data-dur="15">15s</button>
         <button class="btn primary" data-dur="30">30s</button>
         <button class="btn" data-dur="60">60s</button>
+        <button class="btn" data-dur="0" title="freeplay">∞</button>
       </span>
       <button id="gameStart" class="btn primary" style="margin-left:12px;">start</button>
       <button id="gameReset" class="btn">new</button>
@@ -1016,9 +1017,15 @@ function renderGame() {
     html += `<span class="${cls}">${ch}</span>`;
   }
   gamePrompt.innerHTML = html;
-  gameTime.textContent = game.running
-    ? Math.max(0, game.duration - Math.floor((performance.now() - game.startPerf)/1000))
-    : game.duration;
+  if (game.duration === 0) {
+    gameTime.textContent = game.running
+      ? Math.floor((performance.now() - game.startPerf)/1000)
+      : "∞";
+  } else {
+    gameTime.textContent = game.running
+      ? Math.max(0, game.duration - Math.floor((performance.now() - game.startPerf)/1000))
+      : game.duration;
+  }
   const elapsedMin = Math.max(0.0001, (performance.now() - game.startPerf) / 60000);
   const wpm = game.running ? Math.round((game.correct / 5) / elapsedMin) : 0;
   const acc = game.typed === 0 ? 100 : Math.round((game.correct / game.typed) * 100);
@@ -1142,7 +1149,7 @@ function beginGameRun() {
   gameStart.textContent = "running";
   const loop = () => {
     const elapsed = (performance.now() - game.startPerf) / 1000;
-    if (elapsed >= game.duration) { endGame(true); return; }
+    if (game.duration > 0 && elapsed >= game.duration) { endGame(true); return; }
     renderGame();
     game.tickId = requestAnimationFrame(loop);
   };
@@ -1190,7 +1197,7 @@ durButtons.forEach(b => {
     durButtons.forEach(x => x.classList.remove("primary"));
     b.classList.add("primary");
     game.duration = +b.dataset.dur;
-    gameTime.textContent = game.duration;
+    gameTime.textContent = game.duration === 0 ? "∞" : game.duration;
   });
 });
 
