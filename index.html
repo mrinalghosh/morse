@@ -689,6 +689,11 @@ document.querySelectorAll("[data-label]").forEach(host => {
 });
 tabs.forEach(tab => {
   tab.addEventListener("click", () => {
+    const prev = activeTab();
+    if (prev === "game" && tab.dataset.tab !== "game" && (game.running || game.counting)) {
+      endGame(false);
+      hideOverlay();
+    }
     tabs.forEach(t => t.classList.remove("active"));
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
     tab.classList.add("active");
@@ -816,7 +821,15 @@ document.addEventListener("keydown", (e) => {
   document.getElementById("backspacePractice").click();
 });
 window.addEventListener("blur", () => { if (keyIsDown) pressUp(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden && keyIsDown) pressUp(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (keyIsDown) pressUp();
+    if (game.running || game.counting) { endGame(false); hideOverlay(); }
+  }
+});
+window.addEventListener("blur", () => {
+  if (game.running || game.counting) { endGame(false); hideOverlay(); }
+});
 
 // Pad pointer support (both pads).
 function bindPad(pad) {
@@ -1012,7 +1025,8 @@ function renderGame() {
   for (let i = 0; i < t.length; i++) {
     const ch = t[i] === " " ? "·" : t[i];
     let cls = "c";
-    if (i < game.idx) cls += game.marks[i] === "ok" ? " done" : " bad";
+    if (t[i] === " ") { /* spaces are separators, not graded */ }
+    else if (i < game.idx) cls += game.marks[i] === "ok" ? " done" : " bad";
     else if (i === game.idx) cls += " cur";
     html += `<span class="${cls}">${ch}</span>`;
   }
