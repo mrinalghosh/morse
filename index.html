@@ -47,6 +47,7 @@
   }
   .settings { display: flex; gap: 16px; align-items: center; color: var(--muted); font-size: 12px; }
   .settings input[type="range"] { width: 80px; accent-color: var(--accent); }
+  #wpmLabel.hidden { display: none; }
 
   .tabs {
     display: flex;
@@ -344,7 +345,7 @@
   <div class="top">
     <div class="brand" data-label="MORSE"></div>
     <div class="settings">
-      <label>wpm <input id="wpm" type="range" min="5" max="30" value="15" /><span id="wpmVal">15</span></label>
+      <label id="wpmLabel">wpm <input id="wpm" type="range" min="5" max="30" value="15" /><span id="wpmVal">15</span></label>
       <label>hz <input id="freq" type="range" min="300" max="900" value="600" /><span id="freqVal">600</span></label>
     </div>
   </div>
@@ -723,8 +724,13 @@ tabs.forEach(tab => {
     ensureAudio(); // warm up on first tab interaction
     if (tab.dataset.tab === "practice") document.getElementById("keyPad").focus();
     if (tab.dataset.tab === "game") document.getElementById("gameKeyPad").focus();
+    syncWpmVisibility();
   });
 });
+function syncWpmVisibility() {
+  document.getElementById("wpmLabel").classList.toggle("hidden", activeTab() !== "viz");
+}
+syncWpmVisibility();
 function activeTab() {
   return document.querySelector(".tab.active").dataset.tab;
 }
@@ -1207,6 +1213,9 @@ function cancelCountdown() {
 
 function endGame(showDone = false) {
   const wasRunning = game.running;
+  const finalElapsedMin = Math.max(0.0001, (performance.now() - game.startPerf) / 60000);
+  const finalWpm = wasRunning ? Math.round((game.correct / 5) / finalElapsedMin) : 0;
+  const finalAcc = game.typed === 0 ? 100 : Math.round((game.correct / game.typed) * 100);
   cancelCountdown();
   game.running = false;
   if (game.tickId) cancelAnimationFrame(game.tickId);
@@ -1220,9 +1229,9 @@ function endGame(showDone = false) {
   svgGame.querySelectorAll(".edge.target").forEach(e => e.classList.remove("target"));
   renderGame();
   if (showDone && wasRunning) {
-    const wpmTxt = gameWpm.textContent;
-    const accTxt = gameAcc.textContent;
-    showOverlay("done", `${wpmTxt} wpm · ${accTxt}% acc`, true);
+    gameWpm.textContent = finalWpm;
+    gameAcc.textContent = finalAcc;
+    showOverlay("done", `${finalWpm} wpm · ${finalAcc}% acc`, true);
     beepCountdown(true);
   }
 }
